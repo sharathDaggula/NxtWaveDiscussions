@@ -1,0 +1,138 @@
+const express = require('express')
+const path = require('path')
+const {open} = require('sqlite')
+const sqlite3 = require('sqlite3')
+const app = express()
+app.use(express.json())
+const dbPath = path.join(__dirname, 'cricketMatchDetails.db')
+let db = null
+const initializeDBAndServer = async () => {
+  try {
+    db = await open({
+      filename: dbPath,
+      driver: sqlite3.Database,
+    })
+    app.listen(3000, () => {
+      console.log('Server running at http://localhost:3000/')
+    })
+  } catch (e) {
+    console.log(`DB Error: ${e.message}`)
+    process.exit(1)
+  }
+}
+
+initializeDBAndServer()
+
+//API 1 -- get all players from player_details table
+app.get('/players/', async (request, response) => {
+  const getPlayersQuery = `
+  SELECT * FROM player_details`
+  const result = await db.all(getPlayersQuery)
+  const myArr = []
+  for (let each of result) {
+    myArr.push(each)
+  }
+  response.send(myArr)
+})
+
+//API 2 -- Returns specific player based on his id
+app.get('/players/:playerId', async (request, response) => {
+  const {playerId} = request.params
+  const getPlayerQuery = `
+  SELECT * FROM player_details WHERE player_id = ${playerId}`
+  const result = await db.get(getPlayerQuery)
+  const formattedResult = {
+    playerId: result.player_id,
+    playerName: result.player_name,
+  }
+  response.send(formattedResult)
+})
+
+//API 3 -- Updating specific player based on his id
+app.put('/players/:playerId', async (request, response) => {
+  const {playerId} = request.params
+  const playerDetails = request.body
+  const {playerName} = playerDetails
+  const getPlayerQuery = `
+  UPDATE player_details 
+  SET player_name = '${playerName}'
+  WHERE player_id = ${playerId}`
+  await db.get(getPlayerQuery)
+
+  response.send('Player Details Updated')
+})
+
+//API 4 -- Get match details from match_details table using  a match id
+app.get('/matches/:matchId/', async (request, response) => {
+  const {matchId} = request.params
+  const getMatchDetailsQuery = `
+  SELECT * FROM match_details WHERE match_id = ${matchId};`
+  const result = await db.get(getMatchDetailsQuery)
+  const formattedResult = {
+    matchId: result.match_id,
+    match: result.match,
+    year: result.year,
+  }
+  response.send(formattedResult)
+})
+
+//API 5 -- get all matches of a player using player_id
+app.get('/players/:playerId/matches', async (request, response) => {
+  const {playerId} = request.params
+  const getMatchDetailsQuery = `
+  SELECT match_details.match_id AS match_id, match_details.match AS match, match_details.year AS year
+  FROM match_details
+  INNER JOIN player_match_score
+  ON match_details.match_id = player_match_score.match_id
+  WHERE player_id = ${playerId};`
+  const result = await db.all(getMatchDetailsQuery)
+  const formattedResult = result.map(eachMatch => ({
+    matchId: eachMatch.match_id,
+    match: eachMatch.match,
+    year: eachMatch.year,
+  }))
+  response.send(formattedResult)
+})
+
+//API 6 -- return a list of players based on match id
+app.get('/matches/:matchId/players', async (request, response) => {
+  const {matchId} = request.params
+  const getPlayerDetailsQuery = `
+  SELECT player_details.player_id AS player_id, player_details.player_name AS player_name
+  FROM player_details
+  INNER JOIN player_match_score
+  ON player_details.player_id = player_match_score.player_id
+  WHERE match_id = ${matchId};`
+  const result = await db.all(getPlayerDetailsQuery)
+  const formattedResult = result.map(eachPlayer => ({
+    playerId: eachPlayer.player_id,
+    playerName: eachPlayer.player_name,
+  }))
+  response.send(formattedResult)
+})
+
+//API 7 -- returns stats of specific player based on his player_id
+app.get('/players/:playerId/playerScores/', async (request, response) => {
+  try {
+    const {playerId} = request.params
+    const getPlayerStatsQuery = `
+    SELECT player_details.player_id AS player_id, player_details.player_name, SUM(player_match_score.score) AS total_score, SUM(player_match_score.fours) AS total_fours, SUM(player_match_score.sixes) AS total_sixes
+    FROM player_match_score 
+    INNER JOIN player_details
+    ON player_match_score.player_id = player_details.player_id
+    WHERE player_details.player_id = ${playerId}`
+
+    const result = await db.get(getPlayerStatsQuery)
+    const filteredResult = {
+      playerId: result.player_id,
+      playerName: result.player_name,
+      totalScore: result.total_score,
+      totalFours: result.total_fours,
+      totalSixes: result.total_sixes,
+    }
+    response.send(filteredResult)
+  } catch (e) {
+    console.log(`DB ERROR: ${e.message}`)
+  }
+})
+module.exports = app
